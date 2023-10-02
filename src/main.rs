@@ -4,13 +4,8 @@ use std::io;
 
 use dashmap::mapref::one::Ref;
 use dashmap::DashMap;
-use lazy_static::lazy_static;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpSocket, TcpStream};
-
-lazy_static! {
-    static ref STORE: DashMap<String, String> = DashMap::new();
-}
+use tokio::net::{TcpListener, TcpStream};
 
 pub struct Connection {
     socket: TcpStream,
