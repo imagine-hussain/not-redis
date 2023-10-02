@@ -59,7 +59,10 @@ impl Connection {
     pub async fn run(mut self) -> Result<(), MyError> {
         loop {
             match self.read_command().await {
-                Ok(cmd) => self.reply(self.handle_command(cmd)).await?,
+                Ok(cmd) => {
+                    let resp = self.handle_command(cmd);
+                    self.reply(resp).await?;
+                }
                 Err(e) => match e {
                     MyError::Io(_) => todo!(),
                     MyError::InvalidCommand => todo!(),
@@ -78,7 +81,7 @@ impl Connection {
                     let s = std::str::from_utf8(&mut self.buffer).unwrap();
                     println!("Received: `{s}` of len({n})");
                 }
-                Err(e) => return Err(e),
+                Err(e) => return Err(MyError::from(e)),
             }
         }
         Ok(())
@@ -86,6 +89,9 @@ impl Connection {
 
     async fn reply(&mut self, resp: Response) -> Result<(), MyError> {
         let resp = resp.to_string();
+        self.socket.write_all(resp.as_bytes()).await?;
+        self.socket.flush().await?;
+        Ok(())
     }
 
     async fn read_command(&mut self) -> Result<Command, MyError> {
@@ -104,6 +110,12 @@ impl Connection {
             };
             self.buflen += bytes_read;
         }
+
+        println!(
+            "Got: {:?}",
+            String::from_utf8(self.buffer[..self.buflen].to_vec())
+        );
+
         let end_index = self.buffer_crlf().ok_or_else(|| {
             self.clear_buffer();
             MyError::MessageTooLong
@@ -174,6 +186,7 @@ impl TryFrom<&str> for Command {
     type Error = MyError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
+        println!("parsing: `{value}`");
         let mut split = value.split(" ");
 
         let cmd = split.next();
@@ -194,6 +207,7 @@ impl TryFrom<&str> for Command {
     }
 }
 
+#[derive(Debug)]
 pub enum MyError {
     Io(io::Error),
     InvalidCommand,
@@ -232,5 +246,10 @@ fn write_op(f: &mut std::fmt::Formatter<'_>, op: Option<impl Display>) -> std::f
     match op {
         Some(v) => write!(f, "{}", v),
         None => write!(f, "(nil)"),
+    }
+}
+impl From<io::Error> for MyError {
+    fn from(e: io::Error) -> Self {
+        Self::Io(e)
     }
 }
