@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+use std::fmt::Display;
 use std::io;
 
 use dashmap::mapref::one::Ref;
@@ -54,8 +56,21 @@ impl Connection {
         }
     }
 
-    pub async fn run(mut self) -> Result<(), io::Error> {
+    pub async fn run(mut self) -> Result<(), MyError> {
         loop {
+            match self.read_command().await {
+                Ok(cmd) => self.reply(self.handle_command(cmd)).await?,
+                Err(e) => match e {
+                    MyError::Io(_) => todo!(),
+                    MyError::InvalidCommand => todo!(),
+                    MyError::NotEnoughArgs => todo!(),
+                    MyError::NoCommand => todo!(),
+                    MyError::MessageTooLong => todo!(),
+                    MyError::Disconnected => todo!(),
+                    MyError::ConnectClosed => todo!(),
+                    MyError::NonUtf8 => todo!(),
+                },
+            }
             match self.socket.read(&mut self.buffer).await {
                 Ok(0) => break,
                 Ok(n) => {
@@ -67,6 +82,10 @@ impl Connection {
             }
         }
         Ok(())
+    }
+
+    async fn reply(&mut self, resp: Response) -> Result<(), MyError> {
+        let resp = resp.to_string();
     }
 
     async fn read_command(&mut self) -> Result<Command, MyError> {
@@ -184,4 +203,34 @@ pub enum MyError {
     Disconnected,
     ConnectClosed,
     NonUtf8,
+}
+
+/// TODO(imagine-hussain): handle escape characters
+impl Display for Response {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Response::Pong => write!(f, "PONG")?,
+            Response::Echo(s) => write!(f, "{s}")?,
+            Response::Get(v) => {
+                write!(f, "GET")?;
+                write_op(f, v.as_ref())?;
+            }
+            Response::Set(v) => {
+                write!(f, "SET")?;
+                write_op(f, v.as_ref())?;
+            }
+            Response::Del(v) => {
+                write!(f, "DEL")?;
+                write_op(f, v.as_ref())?;
+            }
+        };
+        write!(f, "\r\n")
+    }
+}
+
+fn write_op(f: &mut std::fmt::Formatter<'_>, op: Option<impl Display>) -> std::fmt::Result {
+    match op {
+        Some(v) => write!(f, "{}", v),
+        None => write!(f, "(nil)"),
+    }
 }
