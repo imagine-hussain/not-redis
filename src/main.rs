@@ -1,5 +1,4 @@
-#![allow(dead_code)]
-use std::fmt::{Debug, Display};
+use std::fmt::Debug;
 use std::io;
 
 use dashmap::mapref::one::Ref;
@@ -17,7 +16,7 @@ pub struct Connection {
 
 #[tokio::main]
 async fn main() -> Result<(), MyError> {
-    let listener = TcpListener::bind(("127.0.0.1", 6791)).await?;
+    let listener = TcpListener::bind((LOCALHOST, 6791)).await?;
     ConnectionManager::new(listener).run().await
 }
 
@@ -207,32 +206,8 @@ pub enum MyError {
     NonUtf8,
 }
 
-fn write_op(f: &mut std::fmt::Formatter<'_>, op: Option<impl Display>) -> std::fmt::Result {
-    match op {
-        Some(v) => write!(f, "{}", v),
-        None => write!(f, "(nil)"),
-    }
-}
-
-fn option_string_len(s: Option<&impl AsRef<str>>) -> usize {
-    match s {
-        None => "(nil)".len(),
-        Some(s) => s.as_ref().len(),
-    }
-}
-
 impl From<io::Error> for MyError {
     fn from(e: io::Error) -> Self {
         Self::Io(e)
     }
 }
-
-// mod tests {
-//     #[allow(unused_imports)]
-//     use super::*;
-//     #[test]
-//     fn test_ez() {
-//         let listener = TcpListener::bind((LOCALHOST, 0));
-//         let manager = super::ConnectionManager::new(TcpListener::bind((LOCALHOST, 0)));
-//     }
-// }
