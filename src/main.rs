@@ -1,11 +1,13 @@
 #![allow(dead_code)]
-use std::fmt::Display;
+use std::fmt::{Debug, Display};
 use std::io;
 
 use dashmap::mapref::one::Ref;
 use dashmap::DashMap;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+
+const LOCALHOST: &str = "127.0.0.1";
 
 pub struct Connection {
     socket: TcpStream,
@@ -14,25 +16,40 @@ pub struct Connection {
 }
 
 #[tokio::main]
-async fn main() -> std::io::Result<()> {
-    let addr = ("127.0.0.1", 6791);
-    let listener = TcpListener::bind(addr).await?;
-    println!("Started  conn on: {addr:?}");
-    let store = DashMap::new();
-    loop {
-        match listener.accept().await {
-            Ok((socket, addr)) => {
-                println!("Connection on {addr:?}");
-                let store = store.clone();
-                tokio::spawn(async move {
-                    let conn = Connection::new(socket, store.clone());
-                    if let Err(e) = conn.run().await {
-                        println!("Error: {e:?}");
-                    }
-                });
-            }
-            Err(e) => {
-                println!("Error: {e:?}");
+async fn main() -> Result<(), MyError> {
+    let listener = TcpListener::bind(("127.0.0.1", 6791)).await?;
+    ConnectionManager::new(listener).run().await
+}
+
+struct ConnectionManager {
+    store: DashMap<String, String>,
+    listener: TcpListener,
+}
+
+impl ConnectionManager {
+    fn new(listener: TcpListener) -> Self {
+        Self {
+            store: DashMap::new(),
+            listener,
+        }
+    }
+
+    async fn run(self) -> Result<(), MyError> {
+        loop {
+            match self.listener.accept().await {
+                Ok((socket, addr)) => {
+                    println!("Connection on {addr:?}");
+                    let store = self.store.clone();
+                    tokio::spawn(async move {
+                        let conn = Connection::new(socket, store.clone());
+                        if let Err(e) = conn.run().await {
+                            println!("Error: {e:?}");
+                        }
+                    });
+                }
+                Err(e) => {
+                    println!("Error: {e:?}");
+                }
             }
         }
     }
@@ -72,7 +89,7 @@ impl Connection {
                 Ok(0) => break,
                 Ok(n) => {
                     // handle the input
-                    let s = std::str::from_utf8(&mut self.buffer).unwrap();
+                    let s = std::str::from_utf8(&self.buffer).unwrap();
                     println!("Received: `{s}` of len({n})");
                 }
                 Err(e) => return Err(MyError::from(e)),
@@ -100,7 +117,7 @@ impl Connection {
 
         let msg = dbg!(String::from_utf8(buf.to_vec()).map_err(|_| MyError::NonUtf8)?);
 
-        Ok(Command::try_from(msg.as_str())?)
+        Command::try_from(msg.as_str())
     }
 
     fn handle_command(&mut self, cmd: Command) -> Response {
@@ -139,15 +156,15 @@ impl Response {
             Response::Echo(s) => format!("ECHO {}", s),
             Response::Get(v) => match v {
                 Some(v) => format!("GET {}", v),
-                None => format!("GET (nil)"),
+                None => String::from("GET (nil)"),
             },
             Response::Set(v) => match v {
                 Some(v) => format!("SET {}", v),
-                None => format!("SET (nil)"),
+                None => String::from("SET (nil)"),
             },
             Response::Del(v) => match v {
                 Some(v) => format!("DEL {}", v),
-                None => format!("DEL (nil)"),
+                None => String::from("DEL (nil)"),
             },
         }
     }
@@ -158,7 +175,7 @@ impl TryFrom<&str> for Command {
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         println!("parsing: `{value}`");
-        let mut split = value.split(" ");
+        let mut split = value.split(' ');
 
         let cmd = split.next();
         let mut next_arg = || match split.next() {
@@ -209,3 +226,13 @@ impl From<io::Error> for MyError {
         Self::Io(e)
     }
 }
+
+// mod tests {
+//     #[allow(unused_imports)]
+//     use super::*;
+//     #[test]
+//     fn test_ez() {
+//         let listener = TcpListener::bind((LOCALHOST, 0));
+//         let manager = super::ConnectionManager::new(TcpListener::bind((LOCALHOST, 0)));
+//     }
+// }
