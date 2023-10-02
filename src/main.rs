@@ -11,7 +11,6 @@ pub struct Connection {
     socket: TcpStream,
     store: DashMap<String, String>,
     buffer: [u8; Self::BUFLEN],
-    buflen: usize,
 }
 
 #[tokio::main]
@@ -47,12 +46,12 @@ impl Connection {
             socket,
             store,
             buffer: [0; Self::BUFLEN],
-            buflen: 0,
         }
     }
 
     pub async fn run(mut self) -> Result<(), MyError> {
         loop {
+            println!("in run loop");
             match self.read_command().await {
                 Ok(cmd) => {
                     let resp = self.handle_command(cmd);
@@ -83,61 +82,25 @@ impl Connection {
     }
 
     async fn reply(&mut self, resp: Response) -> Result<(), MyError> {
-        let resp = resp.to_string();
+        let resp = resp.to_bytes();
+        self.socket.write_u32(resp.len() as u32).await?;
         self.socket.write_all(resp.as_bytes()).await?;
         self.socket.flush().await?;
         Ok(())
     }
 
     async fn read_command(&mut self) -> Result<Command, MyError> {
-        // No end - try read the end;
-        if self.buffer_crlf().is_none() {
-            // Try read
-            let bytes_read = loop {
-                match self.socket.read(&mut self.buffer[self.buflen..]).await {
-                    Ok(0) => return Err(MyError::ConnectClosed),
-                    Ok(n) => break n,
-                    Err(e) => match e.kind() {
-                        std::io::ErrorKind::Interrupted => continue,
-                        _ => return Err(MyError::Disconnected),
-                    },
-                }
-            };
-            self.buflen += bytes_read;
+        let msg_size = self.socket.read_u32().await? as usize;
+        if msg_size > Self::BUFLEN {
+            return Err(MyError::MessageTooLong);
         }
 
-        println!(
-            "Got: {:?}",
-            String::from_utf8(self.buffer[..self.buflen].to_vec())
-        );
+        let buf = &mut self.buffer[..msg_size];
+        self.socket.read_exact(buf).await?;
 
-        let end_index = self.buffer_crlf().ok_or_else(|| {
-            self.clear_buffer();
-            MyError::MessageTooLong
-        })?;
-
-        let msg = String::from_utf8(self.buffer[..end_index].to_vec()).map_err(|_| {
-            self.clear_buffer();
-            MyError::NonUtf8
-        })?;
-
-        self.cycle_buffer();
+        let msg = dbg!(String::from_utf8(buf.to_vec()).map_err(|_| MyError::NonUtf8)?);
 
         Ok(Command::try_from(msg.as_str())?)
-    }
-
-    fn cycle_buffer(&mut self) {
-        let start = match self.buffer_crlf() {
-            Some(index) => index + 2, // Account for '\r\n'
-            None => return,
-        };
-        self.buffer.copy_within(start..self.buflen, 0);
-        self.buflen -= start;
-    }
-
-    fn clear_buffer(&mut self) {
-        // self.buffer = [0; 1024];
-        self.buflen = 0;
     }
 
     fn handle_command(&mut self, cmd: Command) -> Response {
@@ -150,14 +113,6 @@ impl Connection {
             Command::Set(key, val) => Response::Set(self.store.insert(key, val)),
             Command::Del(val) => Response::Del(self.store.remove(&val).map(|(_, v)| v)),
         }
-    }
-
-    fn buffer_crlf(&self) -> Option<usize> {
-        self.buffer[..self.buflen]
-            .windows(2)
-            .enumerate()
-            .find(|(_, bytes)| (bytes[0], bytes[1]) == (b'\r', b'\n'))
-            .map(|(index, _)| index)
     }
 }
 
@@ -175,6 +130,27 @@ enum Command {
     Get(String),
     Set(String, String),
     Del(String),
+}
+
+impl Response {
+    fn to_bytes(&self) -> String {
+        match self {
+            Response::Pong => String::from("PONG"),
+            Response::Echo(s) => format!("ECHO {}", s),
+            Response::Get(v) => match v {
+                Some(v) => format!("GET {}", v),
+                None => format!("GET (nil)"),
+            },
+            Response::Set(v) => match v {
+                Some(v) => format!("SET {}", v),
+                None => format!("SET (nil)"),
+            },
+            Response::Del(v) => match v {
+                Some(v) => format!("DEL {}", v),
+                None => format!("DEL (nil)"),
+            },
+        }
+    }
 }
 
 impl TryFrom<&str> for Command {
@@ -214,35 +190,20 @@ pub enum MyError {
     NonUtf8,
 }
 
-/// TODO(imagine-hussain): handle escape characters
-impl Display for Response {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Response::Pong => write!(f, "PONG")?,
-            Response::Echo(s) => write!(f, "{s}")?,
-            Response::Get(v) => {
-                write!(f, "GET")?;
-                write_op(f, v.as_ref())?;
-            }
-            Response::Set(v) => {
-                write!(f, "SET")?;
-                write_op(f, v.as_ref())?;
-            }
-            Response::Del(v) => {
-                write!(f, "DEL")?;
-                write_op(f, v.as_ref())?;
-            }
-        };
-        write!(f, "\r\n")
-    }
-}
-
 fn write_op(f: &mut std::fmt::Formatter<'_>, op: Option<impl Display>) -> std::fmt::Result {
     match op {
         Some(v) => write!(f, "{}", v),
         None => write!(f, "(nil)"),
     }
 }
+
+fn option_string_len(s: Option<&impl AsRef<str>>) -> usize {
+    match s {
+        None => "(nil)".len(),
+        Some(s) => s.as_ref().len(),
+    }
+}
+
 impl From<io::Error> for MyError {
     fn from(e: io::Error) -> Self {
         Self::Io(e)
