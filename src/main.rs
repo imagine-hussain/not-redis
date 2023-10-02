@@ -7,17 +7,18 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
 const LOCALHOST: &str = "127.0.0.1";
+const DEFAULT_PORT: u16 = 6791;
+
+#[tokio::main]
+async fn main() -> Result<(), MyError> {
+    let listener = TcpListener::bind((LOCALHOST, DEFAULT_PORT)).await?;
+    ConnectionManager::new(listener).run().await
+}
 
 pub struct Connection {
     socket: TcpStream,
     store: DashMap<String, String>,
     buffer: [u8; Self::BUFLEN],
-}
-
-#[tokio::main]
-async fn main() -> Result<(), MyError> {
-    let listener = TcpListener::bind((LOCALHOST, 6791)).await?;
-    ConnectionManager::new(listener).run().await
 }
 
 struct ConnectionManager {
