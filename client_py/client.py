@@ -92,7 +92,7 @@ class NotRedisConn():
     async def ping(self) -> Literal["PONG"]:
         msg = 'PING'
         self._send(msg.encode())
-        retval = str(await self.recv())
+        retval = await self.recv_str()
         assert retval == 'PONG'
         return retval
 
@@ -102,6 +102,14 @@ class NotRedisConn():
         self._send(msg.encode())
         return await self._recv_with_arg()
 
+    @yield_when_done
+    async def clear(self) -> Literal["CLR"]:
+        msg = 'CLR'
+        self._send(msg.encode())
+        retval = await self.recv_str()
+        assert retval == 'CLR'
+        return retval
+
     async def _recv_with_arg(self) -> Optional[str]:
         prev_val = await self.recv_str()
         return (
@@ -109,6 +117,7 @@ class NotRedisConn():
             if prev_val != '(nil)'
             else None
         )
+
 
     async def yield_to_pool(self):
         await self.pool.yield_conn(self)

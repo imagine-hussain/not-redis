@@ -2,7 +2,7 @@ use std::fmt::Debug;
 use std::io;
 
 use dashmap::mapref::one::Ref;
-use dashmap::DashMap;
+use dashmap::{DashMap, Map};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
@@ -129,6 +129,10 @@ impl Connection {
             Command::Get(key) => Response::Get(own(self.store.get(&key))),
             Command::Set(key, val) => Response::Set(self.store.insert(key, val)),
             Command::Del(val) => Response::Del(self.store.remove(&val).map(|(_, v)| v)),
+            Command::Clear => {
+                self.store.clear();
+                Response::Clear
+            }
         }
     }
 }
@@ -139,6 +143,7 @@ enum Response {
     Get(Option<String>),
     Set(Option<String>),
     Del(Option<String>),
+    Clear,
 }
 
 enum Command {
@@ -147,6 +152,7 @@ enum Command {
     Get(String),
     Set(String, String),
     Del(String),
+    Clear,
 }
 
 impl Response {
@@ -166,6 +172,7 @@ impl Response {
                 Some(v) => format!("DEL {}", v),
                 None => String::from("DEL (nil)"),
             },
+            Response::Clear => String::from("CLR"),
         }
     }
 }
@@ -189,6 +196,7 @@ impl TryFrom<&str> for Command {
             Some("GET") => Ok(Self::Get(next_arg()?)),
             Some("SET") => Ok(Self::Set(next_arg()?, next_arg()?)),
             Some("DEL") => Ok(Self::Del(next_arg()?)),
+            Some("CLR") => Ok(Self::Clear),
             Some(_) => Err(Self::Error::InvalidCommand),
             None => Err(Self::Error::NoCommand),
         }
