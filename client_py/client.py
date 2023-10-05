@@ -1,45 +1,49 @@
+from __future__ import annotations
 import socket
 import time
 from queue import Queue
 from typing import Literal, Optional, Union
+from threading import Semaphore
 import functools
+import asyncio
 
 def yield_when_done(f, *args, **kwargs):
     @functools.wraps(f)
-    def wrapper(self: NotRedisConn, *args, **kwargs):
+    async def wrapper(self: NotRedisConn, *args, **kwargs):
         f(self, *args, **kwargs)
-        self.yield_to_pool()
+        await self.yield_to_pool()
     return wrapper
 
 
 class NotRedisConnPool():
-    def __init__(self, host: str, port: int, size: int = 8):
+    async def __init__(self, host: str, port: int, size: int = 8):
         self.addr = (host, port)
-        self.connections: Queue[NotRedisConn] = Queue()
-        # TODO: fill conn
-        self.size = size
+        self._size = size
+        self._sem = asyncio.Semaphore(size)
+        self._connections: Queue[NotRedisConn] = Queue()
+        for _ in range(size):
+            self._connections.put(self._create_new_conn())
 
-    def new_conn(self):
+    def _create_new_conn(self):
+        """
+        Create a new connection to the server.
+        Note that this does NOT add the connection to the pool.
+        """
         conn = NotRedisConn(*self.addr, self)
-        self.yield_conn(conn)
         return conn
 
-    def get_conn(self) -> NotRedisConn:
-        while (conn := self.connections.get()) is None:
-            # dont actly sleep like this
-            time.sleep(0.1)
-        return conn
+    async def get_conn(self) -> NotRedisConn:
+        await self._sem.acquire()
+        return self._connections.get()
 
-    def yield_conn(self, conn: NotRedisConn):
-        self.connections.put(conn)
-
+    async def yield_conn(self, conn: NotRedisConn):
+        self._connections.put(conn)
+        self._sem.release()
 
 class NotRedisConn():
-
     def __init__(self, host: str, port: int, pool: NotRedisConnPool):
         self.socket = socket.create_connection((host, port))
         self.pool = pool
-
 
     def _send(self, data: Union[bytes, bytearray]):
         # The first 4 bytes of the data is the length of the data
@@ -90,8 +94,8 @@ class NotRedisConn():
             else None
         )
 
-    def yield_to_pool(self):
-        self.pool.yield_conn(self)
+    async def yield_to_pool(self):
+        await self.pool.yield_conn(self)
 
     def close(self):
         self.socket.close()
