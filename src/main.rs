@@ -2,7 +2,7 @@ use std::fmt::Debug;
 use std::io;
 
 use dashmap::mapref::one::Ref;
-use dashmap::{DashMap, Map};
+use dashmap::DashMap;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
