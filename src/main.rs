@@ -121,7 +121,9 @@ impl Connection {
     }
 
     fn handle_command(&mut self, cmd: Command) -> Response {
-        let own = |op: Option<Ref<'_, _, String, _>>| op.map(|v| v.to_string());
+        fn own(op: Option<Ref<'_, String, String>>) -> Option<String> {
+            op.map(|v| v.to_string())
+        }
 
         match cmd {
             Command::Ping => Response::Pong,
